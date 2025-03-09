@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wo lang darf ich fahren?</title>
+
+  <script>
+    // Turns, e.g., BGS into Berlin-Gesundbrunnen using the Leitpunkzverzeichnis
+    // see the end of this document, it's really (!) long.
+    function mapLeitpunktkuerzel (abbr) {
+      if (abbr in leitpunktDirectory) {
+        return leitpunktDirectory[abbr]
+      } else {
+        return abbr
+      }
+    }
+
+    // Takes a Wegetext such as (MS*OS/HA*BI)*H*(SDL/MD)*BGS and turns it into
+    // a multi-dimensional array for all alternatives and Raumbegrenzungen.
+    function parseWegetext (text) {
+      text = text.toUpperCase().replace(/\s*/g, '')
+
+      const positions = []
+
+      let currentPosition = ''
+      let isInGroup = false
+
+      for (const char of text) {
+        if (char === '(') {
+          // Begin alternative-group
+          isInGroup = true
+        } else if (char === ')') {
+          // End alternative-group
+          if (!isInGroup) {
+            throw new Error('Konnte Wegetext nicht lesen: ) gefunden, aber ( nicht vorhanden.')
+          }
+
+          if (!currentPosition.includes('/')) {
+            throw new Error('Konnte Wegetext nicht lesen: Gruppe gefunden, aber ohne Alternativen-Begrenzer "/".')
+          }
+
+          const [one, two] = currentPosition.split('/')
+          positions.push([parseWegetext(one), parseWegetext(two)]) // Parse alternative
+          currentPosition = ''
+          isInGroup = false
+        } else if (char === '*' && !isInGroup && currentPosition !== '') {
+          // Top-level splitter
+          positions.push(currentPosition)
+          currentPosition = ''
+        } else if (char === '*' && currentPosition === '') {
+          // Ignore stars at the beginning of positions
+        } else {
+          // Part of a Wegepunkt
+          currentPosition += char
+        }
+      }
+
+      if (currentPosition !== '') {
+        positions.push(currentPosition)
+      }
+
+      return positions
+    }
+
+    // Takes a parsed Wegetext part, and turns it into HTML elements, simplifying
+    // the alternatives positions.
+    function wegetextToElements (components) {
+      const result = document.createElement('div')
+      result.classList.add('component')
+      for (const component of components) {
+        if (Array.isArray(component) && component.every(x => typeof x === 'string')) {
+          // Array of simple strings -> combine with arrows
+          const span = document.createElement('div')
+          span.classList.add('position')
+          span.textContent = component.map(mapLeitpunktkuerzel).join(' → ')
+          result.appendChild(span)
+        } else if (Array.isArray(component)) {
+          // Complex array -> parse recursively
+          result.appendChild(wegetextToElements(component))
+        } else {
+          const span = document.createElement('div')
+          span.classList.add('position')
+          span.textContent = mapLeitpunktkuerzel(component)
+          result.appendChild(span)
+        }
+      }
+
+      return result
+    }
+
+    function update () {
+      const input = document.getElementById('wegetext-input')
+      const output = document.getElementById('result-wrapper')
+      const text = input.value
+      if (text.length === 0) {
+        output.textContent = 'Beginne, einen Wegetext einzugeben. Das Ergebnis wird hier in Echtzeit berechnet.'
+        return
+      }
+
+      try {
+        const result = parseWegetext(text)
+        output.textContent = ''
+        const rootElement = wegetextToElements(result)
+        rootElement.setAttribute('id', 'result-wrapper')
+        rootElement.classList.remove('component')
+        output.replaceWith(rootElement)
+      } catch (err) {
+        output.textContent = `Fehler: ${err.message}`
+      }
+    }
+
+    function filterLeitpunkte () {
+      const filter = document.getElementById('leitpunkte-filter')
+      const query = filter.value.trim().toLowerCase()
+      const tbody = document.getElementById('leitpunkte-table')
+      tbody.innerHTML = ''
+      for (const [abbr, name] of Object.entries(leitpunktDirectory)) {
+        if (
+          query !== '' &&
+          !abbr.toLowerCase().includes(query) &&
+          !name.toLowerCase().includes(query)
+        ) {
+          console.log('Ignoring')
+          continue // Skip this row
+        }
+
+        const tr = document.createElement('tr')
+        const td1 = document.createElement('td')
+        const td2 = document.createElement('td')
+
+        td1.textContent = abbr
+        td2.textContent = name
+        tr.appendChild(td1)
+        tr.appendChild(td2)
+        tbody.appendChild(tr)
+      }
+    }
+
+    function init () {
+      console.log('Loading app')
+      const input = document.getElementById('wegetext-input')
+      input.addEventListener('keyup', update)
+      update()
+
+      const filter = document.getElementById('leitpunkte-filter')
+      filter.addEventListener('keyup', filterLeitpunkte)
+
+      // Mount the examples to the DOM
+      const examples = [
+        '(MS*OS/HA*BI)*H*(SDL/MD)*BGS',
+        'Gießen*(LAUT*FD/F*HU)*WUE*(FUE/STEI*AN)',
+        'BSP*(SDL*SAW*UE/WBE*LWL*HH)*HAR',
+        'Flensburg*(KI/RD)*HH*(H*BI*HA/HB*D)',
+        'BIET*(PF*KA*MZ*WIBI/MA*F)*LM'
+      ]
+
+      const exampleWrapper = document.getElementById('examples')
+
+      for (const example of examples) {
+        const li = document.createElement('li')
+        exampleWrapper.appendChild(li)
+        const mark = document.createElement('mark')
+        li.appendChild(mark)
+        const code = document.createElement('code')
+        mark.appendChild(code)
+        code.textContent = example
+        li.addEventListener('click', () => {
+          input.value = example
+          update()
+        })
+      }
+
+      // Preset the Leitpunkte-Table
+      filterLeitpunkte()
+    } // END: Init
+
+    document.addEventListener('DOMContentLoaded', init)
+  </script>
+
+  <style>
+    :root {
+      --color-border: gray;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      padding: 0;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      background-color: white;
+      padding: 1em;
+    }
+
+    h1 {
+      margin-bottom: 0px;
+    }
+
+    h1 small, h2 small {
+      font-size: 0.7em;
+    }
+
+    ul li, ol li {
+      margin: 5px;
+    }
+
+    input {
+      width: 100%;
+      font-size: 1.5rem;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid var(--color-border);
+      background-color: yellow;
+    }
+
+    footer {
+      text-align: center;
+      font-size: 1.5rem;
+      padding: 20px 10px;
+      background-color: #ddd;
+      border-radius: 10px;
+    }
+
+    div.container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    table#leitpunkte {
+      margin: 1em auto;
+      border-collapse: collapse;
+
+      th, td {
+        padding: 5px 10px;
+      }
+
+      tr td:first-child {
+        text-align: right;
+        font-weight: bold;
+      }
+
+      tr:not(:last-child), tr:first-child {
+        th, td {
+          border-bottom: 1px solid var(--color-border);
+        }
+      }
+    }
+
+    p#subtitle {
+      margin-top: 0px;
+      font-weight: bold;
+      margin-bottom: 20px;
+    }
+
+    #wegetext-input {
+      display: block;
+    }
+
+    #result-wrapper {
+      overflow: auto;
+      display: flex;
+      border: 2px solid var(--color-border);
+      border-radius: 10px;
+      padding: 20px;
+
+      .component {
+        display: inline-block;
+        padding: 5px;
+        border: 1px solid var(--color-border);
+      }
+
+      .component .component {
+        display: flex;
+        flex-direction: row;
+      }
+
+      .position {
+        display: flex;
+        align-items: center;
+        text-align: center;
+        white-space: nowrap;
+        margin: 5px;
+        padding: 5px 10px;
+      }
+
+      .component .position:not(:last-child) {
+        border-bottom: 1px solid var(--color-border);
+      }
+    }
+
+    #examples li code {
+      cursor: pointer;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body {
+        background-color: #333;
+        color: white;
+      }
+
+      footer {
+        background-color: #555;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Wo lang darf ich fahren?</h1>
+    <p id="subtitle">Streckenverbindung der DB entschlüsseln</p>
+    <p>
+      Wer schon einmal mit der DB gefahren ist und sich das Ticket genauer
+      angesehen hat, hat schon einmal Verbindungs-Infos wie die folgenden gesehen:
+    </p>
+  
+    <p>
+      <pre><code><strong>Verbindung</strong>
+Düsseldorf+City - Berlin+City
+Via: &lt;1080&gt;<mark>(MS*OS/HA*BI)*H*(SDL/MD)*BGS</mark>
+      </code></pre>
+    </p>
+  
+    <p>
+      Dieser Text ist vor allem für Flex-Tickets extrem wichtig. Flex-Tickets haben
+      zwar keine <strong>Zugbindung</strong>, sehr wohl aber eine
+      <strong>Streckenbindung</strong>. Das heißt, mit einem Flex-Ticket darf man
+      jeden beliebigen Zug nehmen, aber eben nur, sofern die Züge über die
+      angegebenen Städte fahren. Im Bahn-Deutsch ist dieser kryptische Text ein
+      sogenannter <strong>Wegetext</strong>, der eine Wegevorschrift beschreibt.
+    </p>
+  
+    <p>
+      Diese Angaben zu entziffern ist allerdings ziemlich schwierig. Vor allem,
+      weil die Deutsche Bahn nicht immer die typischen Auto-Kennzeichen verwenden
+      kann (z.B. steht BGS für Berlin-Gesundbrunnen).
+    </p>
+  
+    <p>
+      Dieses Tool schafft Abhilfe. Gebt den markierten Teil der "Via"-Angabe im
+      Textfeld ein, und lasst euch ausgeben, welche Stationen eure Züge abfahren
+      müssen. Achtet darauf, die Angaben exakt wie im markierten Beispiel anzugeben,
+      weil das Tool sonst die verschiedenen Alternativen nicht entziffern kann.
+    </p>
+  </div>
+  <form>
+    <input
+      autocapitalize="false"
+      autocomplete="false"
+      autocorrect="false"
+      id="wegetext-input"
+      type="text"
+      placeholder="(MS*OS/HA*BI)*H*(SDL/MD)*BGS"
+      value="(MS*OS/HA*BI)*H*(SDL/MD)*BGS"
+    />
+  </form>
+
+  <h2>Ergebnis <small>(→ Leserichtung →)</small></h2>
+  <div id="result-wrapper">
+    Beginne, einen Wegetext einzugeben. Das Ergebnis wird hier in Echtzeit berechnet.
+  </div>
+
+  <div class="container">
+    <p>
+      Lesebeispiel für <mark><code>(MS*OS/HA*BI)*H*(SDL/MD)*BGS</mark></code>:
+      Von Düsseldorf aus muss der Zug entweder über Münster <strong>und</strong>
+      Osnabrück <em>oder</em> über Hagen <strong>und</strong> Bielefeld fahren.
+      Danach muss Hannover folgen. Dann kann der Zug wieder entweder über
+      Stendal Hbf oder Magdeburg Hbf fahren, bevor er auf jeden Fall über Berlin
+      Gesundbrunnen fahren muss.
+    </p>
+    <h2>Beispiele <small>(Klicken zum Ausführen)</small></h2>
+
+    <ul id="examples"></ul>
+
+    <h2>Mehr Infos</h2>
+    <p>
+      Wer mit einem Flex-Ticket unterwegs ist und eine alternative Verbindung
+      wählt, die zwar am richtigen Endbahnhof ankommt, dabei aber einen anderen
+      Weg nimmt, als auf der Fahrkarte aufgedruckt, der riskiert eine Strafe.
+      Leider ist diese essenzielle Information nur mit viel Googlen zu
+      entschlüsseln. Damit ich die Arbeit nicht jedes Mal neu machen muss, habe
+      ich dieses Tool geschrieben. Es nutzt das frei verfügbare Verzeichnis von
+      Leitpunkt-Kürzeln der DB und entschlüsselt auch die etwas sperrige Syntax.
+    </p>
+    <p>
+      Die Wegevorschrift funktioniert wie folgt:
+    </p>
+    <ol>
+      <li>Die "Via"-Angabe ist von links nach rechts zu lesen</li>
+      <li>Die Großbuchstaben sind Abkürzungen für Bahnhöfe, sogenannte "Leitpunkte"</li>
+      <li>Sterne (<code>*</code>) separieren die verschiedenen Angaben</li>
+      <li>
+        Angaben in <code>(</code>Klammern<code>)</code>, beschreiben eine
+        <strong>Raumbegrenzung</strong>. Eine Raumbegrenzung kombiniert zwei
+        alternative Strecken, die beide genommen werden dürfen.
+      </li>
+      <li>Die zwei Alternativen werden mit einem Schrägstrich (<code>/</code>) getrennt</li>
+      <li>
+        Innerhalb einer Raumbegrenzung können mehrere Leitpunkte aufeinander folgen,
+        wieder getrennt mit Sternen.
+      </li>
+    </ol>
+    <h3>Quellen</h3>
+    <ul>
+      <li>
+        <a href="https://bahnreise-wiki.de/wiki/Wegevorschrift_und_Raumbegrenzung">
+          Erklärung: Wegevorschrift und Raumbegrenzung in der Bahnreise-Wiki
+        </a>
+      </li>
+      <li>
+        Die Quellen für dieses Tool sind erhältlich bei der DB in den
+        <a href="https://www.bahn.de/agb#bb">
+          Tarifbekanntmachungen und Beförderungsbedingungen
+        </a>, Sektion "Entfernungswerk des Deutschlandtarifs":
+        <ul>
+          <li>
+            Die "Vorbemerkungen zum Entfernungswerk" beschreiben das Format der
+            Wegetexte und die Logik dahinter.
+          </li>
+          <li>
+            Die "Leitpunktkürzel" ist eine PDF mit allen Leitpunktkürzeln und
+            vollständigen Namen. Dieses Tool nutzt genau diese Liste, um die
+            Leitpunktkürzel in lesbare Namen umzuwandeln.
+          </li>
+          <li>
+            Die "Grundentfernungen und Wegetexte" ist ein ziemlich vollständiges
+            Verzeichnis aller Wegetexte (knapp 3,000 Seiten).
+          </li>
+        </ul>
+      </li>
+    </ul>
+    <h3>Bonus: Filterbare Liste aller Leitpunkte</h3>
+    <p>
+      Da ich die Daten ja eh habe, nutzt gerne das Suchfeld, um bestimmte
+      Leitpunkte zu finden. Das geht auch schneller, als die PDF durchzusuchen.
+    </p>
+    <p>
+      <input id="leitpunkte-filter" type="search" placeholder="Filtern...">
+    </p>
+    <table id="leitpunkte">
+      <thead>
+        <tr>
+          <th>Abkürzung</th>
+          <th>Name des Leitpunkts</th>
+        </tr>
+      </thead>
+      <tbody id="leitpunkte-table"></tbody>
+    </table>
+  </div>
+  <footer>
+    <div class="container">
+      Ein Service von Hendrik Erz<br>
+      <a href="https://www.hendrik-erz.de/">Webseite</a>
+      | <a href="https://ko-fi.com/hendrikerz">Spendiert mir 'nen Kaffee (Ko-Fi)</a>
+      | <a href="https://github.com/nathanlesage/TODO">Quellcode auf GitHub</a>
+      <br>
+      Probleme bitte auf GitHub melden, dann kümmere ich mich.
+    </div>
+  </footer>
+
+
+<script>
+  /* Hi! Below follows the most recent Leitpunktkürzel-Verzeichnis at the time
+  of writing. Let me know if it's missing something. */
+  const leitpunktDirectory = {
+    A: 'Augsburg Hbf',
+    AA: 'Aalen Hbf',
+    AB: 'Aschaffenburg Hbf',
+    ABG: 'Altenburg',
+    AC: 'Aachen Hbf',
+    ACH: 'Achern',
+    ACSG: 'Aachen Süd(Gr)',
+    ADE: 'Adelebsen',
+    AIC: 'Aichach',
+    ALL: 'Allersberg(Rothsee)',
+    ALT: 'Altenbeken',
+    AN: 'Ansbach',
+    AND: 'Andernach',
+    ANG: 'Angermünde',
+    APO: 'Apolda',
+    ARD: 'Arnsdorf(Dresden)',
+    ARN: 'Arnstadt Hbf',
+    ASCH: 'Ascheberg(Holst)',
+    ASL: 'Aschersleben',
+    AU: 'Aue(Sachs)',
+    AUL: 'Aulendorf',
+    AUS: 'Au(Sieg)',
+    AZ: 'Alzey',
+    B: 'Berlin Friedrichstr',
+    BA: 'Bamberg',
+    BAAL: 'Baalberge',
+    BAB: 'Babenhausen(Hess)',
+    BACK: 'Backnang',
+    BAD: 'Baden-Baden',
+    BALI: 'Bad Liebenwerda',
+    BAS: 'Basel Bad Bf',
+    BB: 'Böblingen',
+    BBG: 'Bernburg Hbf',
+    BCH: 'Berlin-Charlottenbg.',
+    BEB: 'Bebra',
+    BED: 'Bedburg(Erft)',
+    BEGR: 'Bad Bentheim(Gr)',
+    BELZ: 'Bad Belzig',
+    BENS: 'Bensheim',
+    BENT: 'Bad Bentheim',
+    BER: 'Bernau(b Berlin)',
+    BETZ: 'Betzdorf(Sieg)',
+    BF: 'Steinfurt-Burgstein.',
+    BGS: 'Berlin Gesundbrunnen',
+    BHBF: 'Berlin Hbf',
+    BHS: 'Berlin-Hohenschönh.',
+    BHV: 'Bremerhaven Hbf',
+    BI: 'Bielefeld Hbf',
+    BIET: 'Bietigheim-Bissingen',
+    BILL: 'Billerbeck',
+    BIN: 'Bingen(Rhein) Hbf',
+    BIW: 'Bischofswerda',
+    BIZ: 'Biederitz',
+    BKH: 'Berlin-Karlshorst',
+    BKL: 'Bad Kleinen',
+    BLAM: 'Blankenberg(Meckl)',
+    BLF: 'Blankenf(Teltow-Fl)',
+    BLG: 'Bad Blankenburg(Th)',
+    BLH: 'Blankenheim(Sangerh)',
+    BLI: 'Berlin-Lichtenberg',
+    BN: 'Bonn Hbf',
+    BNBE: 'Bonn-Beuel',
+    BNG: 'Burg-u.Ndr Gemünden',
+    BNGO: 'Bonn-Bad Godesberg',
+    BO: 'Bochum Hbf',
+    BOB: 'Berlin Ostbahnhof',
+    BOH: 'Bocholt',
+    BOK: 'Berlin Ostkreuz',
+    BOP: 'Boppard Hbf',
+    BOR: 'Borken(Westf)',
+    BORS: 'Borsdorf(Sachs)',
+    BOT: 'Bottrop Hbf',
+    BR: 'Bruchsal',
+    BRAC: 'Bielefeld-Brackwede',
+    BRB: 'Brandenburg Hbf',
+    BRE: 'Bretleben',
+    BRI: 'Brilon Wald',
+    BRIT: 'Britz',
+    BROI: 'Lengede-Broistedt',
+    BRT: 'Bretten',
+    BRV: 'Bremervörde',
+    BS: 'Braunschweig Hbf',
+    BSFL: 'Schönefeld (b.Bln.)',
+    BSK: 'Berlin Südkreuz',
+    BSP: 'Berlin-Spandau',
+    BSU: 'Bad Schandau',
+    BT: 'Bayreuth Hbf',
+    BTF: 'Bitterfeld',
+    BUCH: 'Buchholz(Nordheide)',
+    BUE: 'Büchen',
+    BUEN: 'Bünde(Westf)',
+    BUEZ: 'Bützow',
+    BULL: 'Bullay(DB)',
+    BULO: 'Buchloe',
+    BUT: 'Buttstädt',
+    BWA: 'Berlin-Wannsee',
+    BWK: 'Berlin Westkreuz',
+    BZ: 'Bautzen',
+    BZG: 'Berlin Zoolg. Garten',
+    C: 'Chemnitz Hbf',
+    CA: 'Calau(Nl)',
+    CALO: 'Calbe(Saale) Ost',
+    CALW: 'Calbe(Saale) West',
+    CAMB: 'Camburg(Saale)',
+    CB: 'Cottbus Hbf',
+    CE: 'Celle',
+    CO: 'Coburg',
+    COC: 'Cochem(Mosel)',
+    COE: 'Coesfeld(Westf)',
+    COEL: 'Cölbe',
+    CON: 'Coburg Nord',
+    COS: 'Coswig(Anh)',
+    COSD: 'Coswig(b Dresden)',
+    CR: 'Crailsheim',
+    CW: 'Calw',
+    D: 'Düsseldorf Hbf',
+    DA: 'Darmstadt Hbf',
+    DD: 'Dresden Hbf',
+    DDN: 'Dresden-Neustadt',
+    DE: 'Dessau Hbf',
+    DEL: 'Delmenhorst',
+    DERN: 'Derneburg(Han)',
+    DFL: 'Düsseldorf Flugh.',
+    DH: 'Diepholz',
+    DIL: 'Dillenburg',
+    DILL: 'Dillingen(Saar)',
+    DL: 'Döbeln Hbf',
+    DN: 'Düren',
+    DO: 'Dortmund Hbf',
+    DOD: 'Dortmund-Dorstfeld',
+    DOKI: 'Doberlug-Kirchhain',
+    DON: 'Donauwörth',
+    DOWH: 'Dortmund Signal Idu.',
+    DOWW: 'Dortmund-Wickede W',
+    DS: 'Donaueschingen',
+    DU: 'Duisburg Hbf',
+    DUED: 'Dürrröhrsdorf',
+    DUEL: 'Dülmen',
+    DZ: 'Delitzsch',
+    E: 'Essen Hbf',
+    EALT: 'Essen-Altenessen',
+    EB: 'Eilenburg',
+    EBB: 'Eberbach',
+    EF: 'Erfurt Hbf',
+    EGID: 'St Egidien',
+    EICH: 'Eichenberg',
+    EIL: 'Lutherstadt Eisleben',
+    EILS: 'Eilsleben(Magdeb)',
+    ELMS: 'Elmshorn',
+    ELW: 'Elsterwerda',
+    ELXL: 'Elxleben',
+    ELZE: 'Elze(Han)',
+    EMD: 'Emden Hbf',
+    EMM: 'Emmerich',
+    EMMG: 'Emmerich(Gr)',
+    ENG: 'Engers',
+    ER: 'Erlangen',
+    ERK: 'Erkelenz',
+    ESA: 'Eisenach Hbf',
+    ESW: 'Eschwege-Niederhone',
+    ESWE: 'Eschwege',
+    EU: 'Euskirchen',
+    EUTG: 'Eutingen im Gäu',
+    EW: 'Eberswalde Hbf',
+    F: 'Frankfurt(Main)Hbf',
+    FB: 'Friedberg(Hess)',
+    FBE: 'Falkenberg(Elster)',
+    FD: 'Fulda',
+    FDS: 'Freudenstadt Hbf',
+    FF: 'Frankfurt(Oder)',
+    FFMF: 'Frankfurt(M)Flugh.',
+    FFMN: 'Frankfurt-Niederrad',
+    FFMS: 'Frankfurt(Main)Süd',
+    FG: 'Freiberg(Sachs)',
+    FH: 'Frankfurt-Höchst',
+    FIN: 'Finnentrop',
+    FINK: 'Finkenkrug',
+    FIW: 'Finsterwalde(Nl)',
+    FKB: 'Frankenberg(Eder)',
+    FL: 'Flensburg',
+    FLOE: 'Flöha',
+    FN: 'Friedrichshafen St.',
+    FOER: 'Förderstedt',
+    FOFR: 'Forbach(fr)',
+    FOR: 'Forst(Lausitz)',
+    FR: 'Freiburg(Brsg)Hbf',
+    FREI: 'Freilassing',
+    FRIJ: 'Bad Friedrichsh Hbf',
+    FROE: 'Fröndenberg',
+    FROS: 'Frose',
+    FRT: 'Frankenthal Hbf',
+    FRW: 'Bad Freienwalde',
+    FS: 'Freising',
+    FSTD: 'Frankfurt(M)Stadion',
+    FUB: 'Fürstenberg(Havel)',
+    FUE: 'Fürth(Bay)Hbf',
+    FUGR: 'Furth im Wald(Gr)',
+    FW: 'Fürstenwalde(Spree)',
+    G: 'Gera Hbf',
+    GAI: 'Gaimersheim',
+    GAM: 'Gammertingen',
+    GAP: 'Garmisch-Partenk.',
+    GC: 'Glauchau(Sachs)',
+    GE: 'Gelsenkirchen Hbf',
+    GEES: 'Geestgottberg',
+    GELN: 'Gelnhausen',
+    GELT: 'Geltendorf',
+    GEM: 'Gemünden(Main)',
+    GER: 'Germersheim',
+    GERO: 'Gerolstein',
+    GERS: 'Gerstungen',
+    GF: 'Gifhorn',
+    GG: 'Groß Gerau',
+    GHA: 'Geithain',
+    GHCB: 'Großenhain Cottb Bf',
+    GHW: 'Gensingen-Horrweiler',
+    GI: 'Gießen',
+    GLA: 'Gladbeck West',
+    GLK: 'Geilenkirchen',
+    GNT: 'Genthin',
+    GO: 'Gokels',
+    GODE: 'Riedstadt-Goddelau',
+    GOE: 'Göttingen',
+    GOES: 'Gößnitz',
+    GOLM: 'Golm',
+    GP: 'Göppingen',
+    GR: 'Görlitz',
+    GRAB: 'Graben-Neudorf',
+    GRAG: 'Grambow(Gr)',
+    GRAS: 'Grasellenbach',
+    GRB: 'Großbothen',
+    GREV: 'Grevenbroich',
+    GRIM: 'Grimmenthal',
+    GRK: 'Großkorbetha',
+    GRS: 'Gransee',
+    GRUE: 'Grünstadt',
+    GRUI: 'Haan-Gruiten',
+    GRUN: 'Grunow(Nl)',
+    GRZ: 'Greiz',
+    GS: 'Goslar',
+    GSN: 'Güsen(b Genthin)',
+    GT: 'Gütersloh Hbf',
+    GTH: 'Gotha',
+    GUE: 'Güstrow',
+    GUET: 'Güterglück',
+    GUNT: 'Baunatal-Guntershaus',
+    GUS: 'Güsten',
+    GUT: 'Gutenfürst',
+    GWZ: 'Jena-Göschwitz',
+    GZ: 'Günzburg',
+    H: 'Hannover Hbf',
+    HA: 'Hagen Hbf',
+    HAGL: 'Hagenow Land',
+    HAL: 'Halle(Saale)Hbf',
+    HALA: 'Halle-Ammendorf',
+    HALN: 'Halle-Neustadt',
+    HALT: 'Haltern am See',
+    HAM: 'Hamm(Westf)Hbf',
+    HAR: 'Hamburg-Harburg',
+    HARZ: 'Bad Harzburg',
+    HAST: 'Haste',
+    HAUS: 'Hausach',
+    HB: 'Bremen Hbf',
+    HBS: 'Halberstadt Hbf',
+    HCH: 'Hechingen',
+    HD: 'Heidelberg Hbf',
+    HDL: 'Haldensleben',
+    HDO: 'Holzdorf(Elster)',
+    HE: 'Helmstedt',
+    HEBO: 'Herborn(Dillkr)',
+    HEI: 'Heide(Holst)',
+    HENN: 'Hennigsdorf(b Bln)',
+    HER: 'Herne',
+    HERB: 'Herbertingen',
+    HERL: 'Herlasgrün',
+    HERP: 'Hersbruck(r Pegnitz)',
+    HERS: 'Bad Hersfeld',
+    HERV: 'Hervest-Dorsten',
+    HERZ: 'Herzogenrath',
+    HESE: 'Hesepe',
+    HET: 'Hettstedt',
+    HF: 'Herford',
+    HH: 'Hamburg-Sternschanze',
+    HHAL: 'Hamburg-Altona',
+    HHBD: 'Hamburg-Bergedorf',
+    HHDA: 'Hamburg Dammtor',
+    HHH: 'Hamburg Hbf',
+    HI: 'Hildesheim Hbf',
+    HIDH: 'Hiddenh.-Schweicheln',
+    HL: 'Lübeck Hbf',
+    HM: 'Hameln',
+    HML: 'HannoverMesseLaatzen',
+    HN: 'Heilbronn Hbf',
+    HNB: 'Herrnburg',
+    HO: 'Hof Hbf',
+    HOCK: 'Hockeroda',
+    HOE: 'Höchst(Odenw)',
+    HOLT: 'Holthusen',
+    HOLZ: 'Holzminden',
+    HOM: 'Homburg(Saar)Hbf',
+    HOR: 'Horb',
+    HORK: 'Horka',
+    HORR: 'Horrem',
+    HOS: 'Hosena',
+    HOSP: 'Hochspeyer',
+    HRB: 'Herrenberg',
+    HRO: 'Rostock Hbf',
+    HST: 'Stralsund Hbf',
+    HU: 'Hanau Hbf',
+    HUS: 'Husum',
+    HY: 'Hoyerswerda',
+    HZ: 'Herzberg(Harz)',
+    IBB: 'Ibbenbüren',
+    IGGR: 'Igel(Gr)',
+    IMM: 'Immendingen',
+    IN: 'Ingolstadt Hbf',
+    IS: 'Iserlohn',
+    IZ: 'Itzehoe',
+    JB: 'Jüterbog',
+    JE: 'Jessen(Elster)',
+    JP: 'Jena Paradies',
+    JS: 'Jena Saalbf',
+    JUEB: 'Jübek',
+    JW: 'Jena West',
+    K: 'Köln Hbf',
+    KA: 'Karlsruhe Hbf',
+    KADU: 'Karlsruhe-Durlach',
+    KAHL: 'Kahl(Main)',
+    KALD: 'Kaldenkirchen',
+    KAM: 'Kamen',
+    KAMZ: 'Kamenz(Sachs)',
+    KAUF: 'Kaufering',
+    KB: 'Korbach Hbf',
+    KBFL: 'Köln/Bonn Flughafen',
+    KBR: 'Königsbrück',
+    KDEU: 'Köln Messe/Deutz',
+    KE: 'Kempten(Allgäu)Hbf',
+    KEGR: 'Kehl(Gr)',
+    KEHL: 'Kehl',
+    KEHR: 'Köln-Ehrenfeld',
+    KF: 'Kaufbeuren',
+    KH: 'Bad Kreuznach',
+    KI: 'Kiel Hbf',
+    KL: 'Kaiserslautern Hbf',
+    KLB: 'Kirchenlaibach',
+    KLE: 'Kleve',
+    KLG: 'Kißlegg',
+    KO: 'Koblenz Hbf',
+    KOEB: 'Koblenz-Ehrenbreit.',
+    KOEN: 'Königsbach(Baden)',
+    KOET: 'Köthen',
+    KOLZ: 'Koblenz-Lützel',
+    KON: 'Könnern',
+    KR: 'Krefeld Hbf',
+    KREI: 'Kreiensen',
+    KREU: 'Kreuztal',
+    KS: 'Kassel-Wilhelmshöhe',
+    KSHB: 'Kassel Hbf',
+    KTW: 'Kettwig',
+    KUF: 'Kufstein',
+    KW: 'Königs Wusterhausen',
+    L: 'Leipzig Hbf',
+    LA: 'Landshut(Bay)Hbf',
+    LAA: 'Laage(Meckl)',
+    LAGE: 'Lage(Lippe)',
+    LAUD: 'Lauda',
+    LAUT: 'Lauterbach(Hess)Nord',
+    LAWL: 'Langwedel',
+    LB: 'Ludwigsburg',
+    LBB: 'Lübbenau(Spreewald)',
+    LBG: 'Velbert-Langenberg',
+    LCH: 'Laucha(Unstrut)',
+    LD: 'Landau(Pfalz)Hbf',
+    LEES: 'Leese-Stolzenau',
+    LEHR: 'Lehrte',
+    LEIF: 'Leinefelde',
+    LER: 'Leer(Ostfriesl)',
+    LETM: 'Letmathe',
+    LEUT: 'Leutkirch',
+    LEVM: 'Leverkusen Mitte',
+    LG: 'Lüneburg',
+    LHFL: 'Leipzig/Halle Flugh',
+    LI: 'Lindau-Insel',
+    LIF: 'Lichtenfels',
+    LIPP: 'Lippstadt',
+    LIRE: 'Lindau-Reutin',
+    LLEU: 'Leipzig-Leutzsch',
+    LM: 'Limburg(Lahn)',
+    LMS: 'Limburg Süd',
+    LN: 'Lübben(Spreewald)',
+    LOEB: 'Löbau(Sachs)',
+    LOEH: 'Löhne(Westf)',
+    LOH: 'Lohmen',
+    LOLL: 'Lollar',
+    LOW: 'Löwenberg(Mark)',
+    LPLA: 'Leipzig-Plagwitz',
+    LSZ: 'Bad Langensalza',
+    LU: 'Ludwigshafen(Rh)Hbf',
+    LUEN: 'Lünen Hbf',
+    LUF: 'Ludwigsfelde',
+    LWL: 'Ludwigslust',
+    M: 'München Hbf',
+    MA: 'Mannheim Hbf',
+    MAK: 'Marktredwitz',
+    MALS: 'Malsfeld',
+    MARG: 'Markkleeberg-Großst',
+    MCK: 'Mühlacker',
+    MD: 'Magdeburg Hbf',
+    MDR: 'Magdeburg-Rothensee',
+    MEHL: 'Mehltheuer',
+    MEI: 'Meißen',
+    MELL: 'Mellingen(Thür)',
+    MER: 'Merseburg Hbf',
+    MERK: 'Merklingen - S. Alb',
+    MET: 'Mellrichstadt Bf',
+    MG: 'Mönchengladbach Hbf',
+    MH: 'Mülheim(Ruhr)Hbf',
+    MI: 'Minden(Westf)',
+    MIDO: 'Michendorf',
+    MIL: 'Miltenberg',
+    MIN: 'Mindelheim',
+    MIW: 'Mittweida',
+    MM: 'Memmingen',
+    MOST: 'München Ost',
+    MPAS: 'München-Pasing',
+    MR: 'Marburg(Lahn)',
+    MS: 'Münster(Westf)Hbf',
+    MT: 'Montabaur',
+    MUE: 'Mühldorf(Oberbay)',
+    MZ: 'Mainz Hbf',
+    MZBI: 'Mainz-Bischofsheim',
+    N: 'Nürnberg Hbf',
+    NAU: 'Nauen',
+    NB: 'Neubrandenburg',
+    NDD: 'Neudietendorf',
+    NDF: 'Narsdorf',
+    NDH: 'Nordhausen',
+    NE: 'Neuss Hbf',
+    NEA: 'Neustadt(Aisch)Bahnh',
+    NECK: 'Mosbach-Neckarelz',
+    NENN: 'Bad Nenndorf',
+    NEUD: 'Neustadt(Dosse)',
+    NEUF: 'Neufahrn(Niederbay)',
+    NEUK: 'Neukieritzsch',
+    NEUS: 'Neustadt(Sachs)',
+    NEUZ: 'Neuzelle',
+    NFS: 'Nürnberg Frankensta',
+    NGM: 'Neckargemünd',
+    NHM: 'Bad Nauheim',
+    NI: 'Nienburg(Weser)',
+    NIDA: 'Nidderau',
+    NIDD: 'Nidda',
+    NIDH: 'Niedernhausen(Ts)',
+    NILA: 'Niederlahnstein',
+    NK: 'Neunkirchen(Saar)Hbf',
+    NKN: 'Neukirchen(b Sulzb)',
+    NMB: 'Naumburg(Saale)Hbf',
+    NMK: 'Neumark(Sachs)',
+    NMO: 'Neumarkt(Oberpf)',
+    NMS: 'Neumünster',
+    NMV: 'Neumarkt-St Veit',
+    NMW: 'Neuenmarkt-Wirsberg',
+    NOE: 'Nördlingen',
+    NOM: 'Northeim(Han)',
+    NOR: 'Norden',
+    NP: 'Neuruppin West',
+    NR: 'Neuwied',
+    NST: 'Nordstemmen',
+    NW: 'Neustadt(Weinstr)Hbf',
+    NWAL: 'Niederwalgern',
+    NZ: 'Neustrelitz Hbf',
+    OB: 'Oberhausen Hbf',
+    OBRO: 'Rödermark-Ob.Roden',
+    OD: 'Bad Oldesloe',
+    OEB: 'Oebisfelde',
+    OERL: 'Oerlinghausen',
+    OEYN: 'Bad Oeynhausen',
+    OF: 'Offenbach(Main)Hbf',
+    OG: 'Offenburg',
+    OHA: 'Osterode a. H. Mitte',
+    OKZ: 'Oberkotzau',
+    OL: 'Oldenburg(Oldb)Hbf',
+    OLD: 'Oldenburg(Holst)',
+    OO: 'Oberoderwitz',
+    OR: 'Oranienburg',
+    ORTR: 'Ortrand',
+    OS: 'Osnabrück Hbf',
+    OST: 'Osterburken',
+    OZ: 'Oschatz',
+    P: 'Potsdam Hbf',
+    PA: 'Passau Hbf',
+    PB: 'Paderborn Hbf',
+    PE: 'Peine',
+    PEG: 'Pegnitz',
+    PEGA: 'Pegau',
+    PF: 'Pforzheim Hbf',
+    PIR: 'Pirna',
+    PL: 'Plauen(Vogtl) ob Bf',
+    PLA: 'Plaaz',
+    PLAT: 'Plattling',
+    PLO: 'Plochingen',
+    PLTH: 'Plaue(Thür)',
+    PPIR: 'Potsdam Pirschheide',
+    PRIB: 'Priemerburg',
+    PRIE: 'Priestewitz',
+    PRO: 'Probstzella',
+    PRWK: 'Pritzwalk',
+    PS: 'Pirmasens Nord',
+    PULS: 'Pulsnitz',
+    PUMS: 'Puttgarden(MS)',
+    PUTT: 'Puttgarden',
+    PW: 'Pasewalk',
+    PZ: 'Prenzlau',
+    QFT: 'Querfurt',
+    QLB: 'Quedlinburg',
+    R: 'Regensburg Hbf',
+    RA: 'Rastatt',
+    RAT: 'Ratingen Ost',
+    RCOL: 'Reichenbach(Ol)',
+    RCVO: 'Reichenbach(V) o Bf',
+    RD: 'Rendsburg',
+    RDW: 'Radebeul-Kötzschenb',
+    RE: 'Recklinghausen Hbf',
+    REM: 'Remagen',
+    RENN: 'Renningen',
+    RHED: 'Rheda-Wiedenbrück',
+    RHEI: 'Rheine',
+    RHH: 'Rheinhausen',
+    RIE: 'Riesa',
+    RN: 'Rathenow',
+    RO: 'Rosenheim',
+    ROBL: 'Röblingen am See',
+    ROHR: 'Rohrbach(Saar)',
+    ROIL: 'Rohrbach(Ilm)',
+    RONN: 'Ronneburg(Thür)',
+    ROTT: 'Rottenbach',
+    ROW: 'Rotenburg(Wümme)',
+    RS: 'Remscheid Hbf',
+    RSL: 'Roßlau(Elbe)',
+    RT: 'Reutlingen Hbf',
+    RU: 'Rudolstadt(Thür)',
+    RUHL: 'Ruhland',
+    RW: 'Rottweil',
+    RY: 'Rheydt Hbf',
+    S: 'Stuttgart Hbf',
+    SAD: 'Schwandorf',
+    SALZ: 'Salzburg Hbf',
+    SAW: 'Salzwedel',
+    SB: 'Saarbrücken Hbf',
+    SBC: 'Stuttgart-Bad Cannst',
+    SBG: 'Strasburg(Uckerm)',
+    SBK: 'Schönebeck(Elbe)',
+    SCHG: 'Schöna(Gr)',
+    SCHH: 'Schaffhausen',
+    SCHL: 'Schlüchtern',
+    SCHM: 'Schwelm',
+    SCHW: 'Schwerte(Ruhr)',
+    SDH: 'Sondershausen',
+    SDL: 'Stendal Hbf',
+    SE: 'Bad Segeberg',
+    SECK: 'Seckach',
+    SEES: 'Seesen',
+    SFB: 'Senftenberg',
+    SFT: 'Staßfurt',
+    SG: 'Solingen Hbf',
+    SGH: 'Sangerhausen',
+    SGM: 'Schwäbisch Gmünd',
+    SHA: 'Schwäb.Hall-Hessent',
+    SHL: 'Suhl',
+    SHS: 'Schönhausen(Elbe)',
+    SI: 'Siegen Hbf',
+    SIF: 'Schifferstadt',
+    SIG: 'Sigmaringen',
+    SIGB: 'Siegburg/Bonn',
+    SIHA: 'Siershahn',
+    SIMB: 'Simbach(Inn)',
+    SIN: 'Singen(Hohentwiel)',
+    SINS: 'Sinsheim(Elsenz) Hbf',
+    SLB: 'Sandersleben(Anh)',
+    SLF: 'Saalfeld(Saale)',
+    SLN: 'Schmölln(Thür)',
+    SLZ: 'Bad Salzungen',
+    SM: 'Schmalkalden',
+    SN: 'Schwerin Hbf',
+    SO: 'Soest',
+    SOEM: 'Sömmerda',
+    SOL: 'Soltau(Han)',
+    SON: 'Sonneberg(Thür)Hbf',
+    SPAI: 'Spaichingen',
+    SR: 'Straubing',
+    STD: 'Stade',
+    STEI: 'Steinach(b Rothenb)',
+    STF: 'Straußfurt',
+    STHM: 'Glauburg-Stockheim',
+    STOL: 'Stolpen',
+    SW: 'Schweinfurt Hbf',
+    SWAA: 'Schwaan',
+    SWB: 'Schwarzenberg(Erzg)',
+    SZRI: 'Salzgitter-Ringelh.',
+    TANG: 'Tantow(Gr)',
+    TBZ: 'Treuenbrietzen',
+    TEL: 'Teltow',
+    TEU: 'Teuchern',
+    THEM: 'Themar',
+    THH: 'Thalheim(Erzgeb)',
+    TP: 'Templin',
+    TR: 'Trier Hbf',
+    TREU: 'Treuchtlingen',
+    TREY: 'Treysa',
+    TRIP: 'Triptis',
+    TROI: 'Troisdorf',
+    TRW: 'Trier West',
+    TS: 'Traunstein',
+    TUE: 'Tübingen Hbf',
+    TUEH: 'Türkheim(Bay)Bf',
+    TUEM: 'Türkismühle',
+    TUT: 'Tuttlingen',
+    UCKR: 'Luckau-Uckro',
+    UE: 'Uelzen',
+    UL: 'Ulm Hbf',
+    UN: 'Unna',
+    VAI: 'Vaihingen(Enz)',
+    VER: 'Verden(Aller)',
+    VIE: 'Viersen',
+    VIEN: 'Vienenburg',
+    VK: 'Völklingen',
+    VS: 'Villingen(Schwarzw)',
+    W: 'Wuppertal Hbf',
+    WAB: 'Wabern(Bz Kassel)',
+    WAF: 'Warendorf',
+    WAL: 'Wallau(Lahn)',
+    WALK: 'Walkenried',
+    WAN: 'Wanne-Eickel Hbf',
+    WAR: 'Warburg(Westf)',
+    WB: 'Luth. Wittenberg Hbf',
+    WBE: 'Wittenberge',
+    WBG: 'Wiesenburg(Mark)',
+    WBR: 'Wüstenbrand',
+    WDA: 'Werdau',
+    WDH: 'Waldheim',
+    WE: 'Weimar',
+    WEB: 'Westerburg',
+    WEET: 'Weetzen',
+    WEID: 'Weida',
+    WEIL: 'Weil der Stadt',
+    WEIN: 'Weinheim(Bergstr)Hbf',
+    WEL: 'Weilburg',
+    WEN: 'Weiden(Oberpf)',
+    WERH: 'Werder(Havel)',
+    WERL: 'Werl',
+    WERN: 'Werneuchen',
+    WERT: 'Wertheim',
+    WES: 'Wesel',
+    WEST: 'Westerland(Sylt)',
+    WETZ: 'Wetzlar',
+    WF: 'Wolfenbüttel',
+    WHSN: 'Wernshausen',
+    WI: 'Wiesbaden Hbf',
+    WIBI: 'Wiesbaden-Biebrich',
+    WINN: 'Winnweiler',
+    WIT: 'Witten Hbf',
+    WITT: 'Wittingen',
+    WIWA: 'Wiesloch-Walldorf',
+    WK: 'Wittstock(Dosse)',
+    WM: 'Weilheim(Oberbay)',
+    WN: 'Waiblingen',
+    WO: 'Worms Hbf',
+    WOB: 'Wolfsburg Hbf',
+    WOE: 'Wörth(Rhein)',
+    WRN: 'Waren(Müritz)',
+    WSF: 'Weißenfels',
+    WTH: 'Wilthen',
+    WTL: 'Wittlich Hbf',
+    WUE: 'Würzburg Hbf',
+    WUED: 'Wünschendorf',
+    WUM: 'Wustermark',
+    WUN: 'Wunsiedel-Holenbrunn',
+    WUNS: 'Wunstorf',
+    WWI: 'Weilerswist',
+    WZN: 'Wriezen',
+    Z: 'Zwickau(Sachs)Hbf',
+    ZE: 'Zerbst/Anhalt',
+    ZEUL: 'Zeulenroda unt Bf',
+    ZGGR: 'Zgorzelec(Gr)',
+    ZI: 'Zittau',
+    ZME: 'Zella-Mehlis',
+    ZS: 'Zossen',
+    ZZ: 'Zeitz'
+    }
+</script>
+</body>
+</html>
